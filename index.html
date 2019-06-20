@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Tuning in PyMC3</title>
+    <link rel="stylesheet" href="css/tufte.css" />
+    <link rel="stylesheet" href="css/latex.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/MathJax.js?config=TeX-MML-AM_CHTML' async>
+    </script>
+
+    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+    <style>
+        code {
+            background-color: #EEEEEE;
+            font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New;
+        }
+
+        .biglogo {
+            border: none;
+            width: auto;
+            height: 14em;
+            margin-top: 3em;
+        }
+
+        .logo {
+            border: none;
+            width: auto;
+            height: 5em;
+            margin-top: 3em;
+        }
+
+        .title {
+            display: inline-block;
+            text-align: right;
+        }
+
+        video {
+            max-width: 100%;
+            height: auto;
+        }
+
+        pre {
+            border: 1px solid #196786;
+            padding: 10px;
+            background-color: aliceblue;
+        }
+    </style>
+</head>
+
+<body>
+    <article>
+        <div class=title style="display: inline-block">
+            <img src="img/PyMC3.png" class=biglogo style="float: right"></img>
+            <div style="float: left;">
+                <h1>Pragmatic Probabilistic Programming</h1>
+                <h2 class="subtitle">Parameter Adaptation in PyMC3</h2>
+                <p class="subtitle"><a href="https://colindcarroll.com">Colin Carroll</a></p>
+            </div>
+        </div>
+        <section>
+            <h2>Introduction</h2>
+            <p><span class=marginnote>This essay is based on a talk given on June 19, 2019 at the <a
+                        href="https://splashthat.com/sites/view/probabilisticdifferentiablepro.splashthat.com">"Probabilistic
+                        & Differentiable Programming Summit"</a>. Original slides are available <a
+                        href="slides.html">here</a>. All <a
+                        href="https://gist.github.com/ColCarroll/d3a90fc51674c5cee9eef50873af4354">the code for
+                        producing the animations</a> is available on github, mostly leaning on <a
+                        href="https://github.com/ColCarroll/minimc">a bespoke library for researching MCMC</a> written
+                    with <a href="https://github.com/google/jax">Jax</a> and <a
+                        href="https://github.com/HIPS/autograd">autograd</a>. Many thanks to the <a
+                        href="https://github.com/pymc-devs/pymc3/graphs/contributors">PyMC3 contributors</a> for
+                    building the library, my colleagues at <a href="https://www.getfreebird.com/">Freebird</a>
+                    for helpful comments, and the conference organizers for inviting me. <img style="max-width: 100px"
+                        src="img/logo-red-new.png" />
+                </span></p>
+
+            <p>I am an open source contributor on a number of libraries, notably <a
+                    href="https://docs.pymc.io/">PyMC3</a>, which is a library for probabilistic programming in Python.
+                One of the benefits of PyMC3 is the friendly, simple api that abstracts away the details of the
+                inference, allowing domain experts to fit models without needing to be experts at inference:</p>
+            <pre class=code>
+import pymc3 as pm
+
+with my_model:  # defined earlier
+    trace = pm.sample()  # ✨✨magic✨✨
+</pre>
+
+            <p>This essay has two goals:
+                <ol>
+                    <li>Provide some intuition into the geometry of some of the algorithms and diagnostics that we
+                        use in probabilistic programming to give some appreciation to what happens in the ✨✨magic✨✨
+                        step, and</li>
+                    <li>Do a code tour to describe how PyMC3 tunes sampler parameters.</li>
+                </ol>
+            </p>
+
+
+            <p>This talk is partly in reaction to a question I was recently asked:
+                <span class="marginnote">
+                    <img src="img/stan_logo.png" alt="Stan Logo" height=200 />
+
+                    Good general advice is to just check
+                    <a href="https://mc-stan.org/docs/2_19/reference-manual/">the Stan manual</a>
+                    for details, but I will do some compare and contrasting on PyMC3's approach.
+                </span>
+                <div class=epigraph>
+                    <blockquote>"What does PyMC3 do that I cannot find in the Stan manual?"</blockquote>
+                </div>
+            </p>
+            <p>I love PyMC3's ease of use, extensibility, and community, we have a well-earned reputation for
+                borrowing good ideas from other libraries, particularly the wonderful
+                <a href="https://mc-stan.org/">Stan</a> library.
+
+                <blockquote class="twitter-tweet" data-lang="en">
+                    <p lang="en" dir="ltr">&quot;There&#39;s an old saying... &#39;Python is the second-best
+                        language for everything&#39;&quot; - <a
+                            href="https://twitter.com/callahad?ref_src=twsrc%5Etfw">@callahad</a> <a
+                            href="https://twitter.com/hashtag/PyCon2018?src=hash&amp;ref_src=twsrc%5Etfw">#PyCon2018</a>
+                    </p>&mdash; Jake VanderPlas (@jakevdp) <a
+                        href="https://twitter.com/jakevdp/status/994934052091318272?ref_src=twsrc%5Etfw">May
+                        11, 2018</a>
+                </blockquote>
+            </p>
+        </section>
+        <section>
+            <h2>What is tuning?</h2>
+
+            <p> "Tuning" broadly describes what happens before sampling. In Bayesian inference, our goal is to calculate
+                expectations<label for="expect" class="margin-toggle sidenote-number"></label>
+                <input type="checkbox" id="expect" class="margin-toggle" /> over probability distributions.
+                <span class=sidenote> Recall that an expectation with respect to a distribution \(\pi\) is
+                    $$
+                    \mathbb{E}[f] = \int f~d\pi.
+                    $$
+                    MCMC works by observing that if you have samples from your distribution, \(x_j \sim \pi\), then
+                    $$
+                    \mathbb{E}[f] \approx \frac{1}{n}\sum_n f(x_j).
+                    $$
+                </span>
+                MCMC achieves that by producing samples that are <em>asymptotically guaranteed</em> to come from the
+                distribution of interest: the "stationary distribution".
+            </p>
+
+            <p>When we tune, we throw away these asymptotic guarantees, searching for parameters for our sampler that
+                will speed up the calculation of these expectations. In the particular case of PyMC3, we default to
+                having 500 tuning samples, after which we <em>fix</em> all the parameters so that the asymptotic
+                guarantees are again in place, and draw 1,000 new samples. By default, the first 500 tuning samples are
+                discarded, as it would be theoretically shaky ground to suggest they came from the stationary
+                distribution at all.
+                <img src="img/what_tuning.png" alt="Barchart of tuning steps" />
+            </p>
+
+        </section>
+
+        <section>
+            <h2>Tuning in Metropolis-Hastings</h2>
+
+            <p>To warm up, consider a Metropolis-Hastings sampler. Recall that Metropolis-Hastings works by making a
+                proposal, and accepting or rejecting based on the ratio of the density of the stationary distribution at
+                the proposed point and at the current point: Always accept if the proposal has higher probability, and
+                sometimes reject if the proposal has lower probability:
+                <span class=marginnote>If we are being careful (which, we're not), Hastings extended the algorithm to non-symmetric
+                    proposal distributions, so this is just a <em>Metropolis</em> acceptance, but all of our proposals
+                    will be symmetric anyways</em></span>
+                $$A(x_t) = \min\left\{1, \frac{\pi(x_t)}{\pi(x_{t - 1})}\right\}$$
+            </p>
+
+            <p>If we consider a proposal distribution that is a normal centered at the previous point with diagonal
+                covariance, there is one parameter to tune, which is the step size.
+                $$x_{t + 1} \sim \mathcal{N}(x_t, sI)$$
+            </p>
+            <p>What are our tradeoffs when choosing step size? Here is a very small step size, being used to sample from
+                an isotropic Gaussian.
+
+                <video autoplay loop>
+                    <source src="img/small_steps.mp4" type="video/mp4" />
+                </video>
+
+                Notice that nearly every proposal is being accepted, because the steps are small
+                enough that the underlying stationary distribution does not change very much. On the right-hand side is
+                an empirical estimate of the mean and 1 standard deviation ellipse, compared with the true mean and
+                standard deviation.
+            </p>
+
+            <p> Going in the other direction, these are very large steps for the proposal - 10,000 times as large as the
+                previous figure - and notice that most proposals are rejected.
+                <video autoplay loop>
+                    <source src="img/big_steps.mp4" type="video/mp4" />
+                </video>
+
+                You can see the empirical mean and standard deviation keep updating as the current position is
+                resampled. There is some evidence that says an acceptance probability of 23.4% is optimal in terms of
+                these expectations converging<label for="accept" class="margin-toggle sidenote-number"></label>
+                <input type="checkbox" id="accept" class="margin-toggle" /><span class=sidenote> Roberts, Gelman, and
+                    Gilks. <a href="https://projecteuclid.org/euclid.aoap/1034625254">"Weak convergence and optimal
+                        scaling of random walk Metropolis algorithms."</a></span>. In practice, PyMC3 tries to get the
+                acceptance probability between 20% and 50% through tuning.
+            </p>
+
+            <p>Here we have a tuned diagonal proposal distribution. There is a mix of acceptances and rejections, and it
+                looks like the mean and covariance are converging to the true values more quickly.
+
+                <video autoplay loop>
+                    <source src="img/medium_steps.mp4" type="video/mp4" />
+                </video>
+
+                Remember: <strong>all three of these examples have theoretical convergence guarantees, but we are
+                    interested in
+                    fast convergence of these expectations.</strong>
+            </p>
+
+            <p> In any rate, this tuning is implemented in a windowed fashion in PyMC3, which will also be the strategy
+                for tuning in our gradient-based samplers.
+                <img src="img/step_tuning.png" />
+            </p>
+            <p>During each of these windows, we make an estimate of a quantity - here the acceptance
+                rate - and then update parameters based on that estimate. This is actual source code, and by default,
+                every 100 samples, this switch statement runs.
+                <pre class=code>
+def tune(scale, acc_rate):
+  """Tunes the scaling parameter for the proposal
+  distribution according to the acceptance rate over the
+  last tune_interval:
+
+  Rate    Variance adaptation
+  ----    -------------------
+  &lt0.001        x 0.1
+  &lt0.05         x 0.5
+  &lt0.2          x 0.9
+  &gt0.5          x 1.1
+  &gt0.75         x 2
+  &gt0.95         x 10
+  """
+  if acc_rate &lt 0.001:
+    # reduce by 90 percent
+    scale *=0.1
+  elif acc_rate &lt 0.05:
+    # reduce by 50 percent
+    ...
+  elif acc_rate &gt 0.95:
+    # increase by one thousand percent
+    scale *= 10
+
+  return scale
+  </pre>
+            </p>
+        </section>
+
+        <section>
+            <h2>Aside: Effective Sample Size</h2>
+            <p> It is worth noting here that the animations above are asking you to judge convergence heuristically.
+                In reality, <em>effective sample size</em> is the diagnostic that
+                we are trying to intuit. The number comes from the observation that for independent, identically
+                distributed random
+                variables, the variance of the empirical mean, \(\hat{\mu}\), is the true variance divided by the number
+                of samples:
+
+                $$\hat{\mu} = \frac{1}{n}\sum_{j=1}^n x_j$$
+                $$\operatorname{Var}(\hat{\mu}) = \frac{\sigma^2}{n},$$
+                where \(\sigma^2\) is the true standard deviation of the underlying distribution.
+            </p>
+
+            <p>
+                Then the effective sample size is defined as the denominator that makes this relationship still be
+                true:
+                $$\operatorname{Var}(\hat{\mu}) = \frac{\sigma^2}{n_{\text{eff}}}.$$
+            </p>
+            <p>This quantity is difficult to compute: you might use multiple chains to estimate
+                \(\operatorname{Var}(\hat{\mu})\), and estimating \(\sigma^2\). There is a great recent paper<label
+                    for="eff" class="margin-toggle sidenote-number"></label> <input type="checkbox" id="eff"
+                    class="margin-toggle" /><span class=sidenote>Vehtari, Aki, Andrew Gelman, Daniel Simpson, Bob
+                    Carpenter, and Paul-Christian Bürkner. <a
+                        href="http://arxiv.org/abs/1903.08008">"Rank-Normalization, Folding, and Localization: An
+                        Improved \(\widehat{R}\) for Assessing Convergence of MCMC."</a></span> giving better up to date
+                details.
+            </p>
+            <p> We might visualize this relationship by running our previous experiment many times, to estimate the
+                variance of the empirical mean over all our samples.
+
+                <video autoplay loop>
+                    <source src="img/multi_steps.mp4" type="video/mp4" />
+                </video>
+            </p>
+        </section>
+
+        <section>
+
+            <h2>Tuning in Hamiltonian Monte Carlo</h2>
+
+            <p> Next we talk about the real interesting bit here: adaptation in gradient-based samplers, specifically
+                Hamiltonian Monte Carlo. As a warning, the story is importantly different for the No-U-Turn
+                sampler<label for="nuts" class="margin-toggle sidenote-number"></label> <input type="checkbox" id="nuts"
+                    class="margin-toggle" /><span class=sidenote>Hoffman and Gelman. "<a
+                        href="http://arxiv.org/abs/1111.4246">The No-U-Turn Sampler: Adaptively Setting Path Lengths in
+                        Hamiltonian Monte Carlo.</a>"</a></span>, mainly because of the dynamic
+                tree building, compared to a fixed path length in HMC.
+            </p>
+            <p> Recall that in Hamiltonian Monte Carlo, there is a system of differential equations we solve,
+                integrating a position, \(\mathbf{q}\), and momentum, \(\mathbf{p}\), for some fixed amount of
+                time<label for="qandp" class="margin-toggle sidenote-number"></label> <input type="checkbox" id="qandp"
+                    class="margin-toggle" /><span class=sidenote>I, for one, blame the physicists for
+                    \(\mathbf{p}\text{omentum}\) and
+                    \(\mathbf{q}\text{osition.}\)</span>.
+                $$
+                \frac{d \mathbf{q}}{dt} = \mathbf{p}, ~~ \frac{d \mathbf{p}}{dt} = - \frac{\partial V}{\partial
+                \mathbf{q}}
+                $$
+            </p>
+            <p>This is a 2D mixture of 3 Gaussians, and I am just simulating Hamiltonian dynamics here, not taking any
+                samples. The Hamiltonian equations conserve energy, so in this physical simulation, a trajectory far
+                away from the probability mass will move slowly: it has traded velocity for potential energy.
+                Conversely, when trajectories pass near regions of high probability, they will move fast, but have very
+                little potential energy.
+                <video autoplay loop>
+                    <source src="img/hmc_examples.mp4" type="video/mp4" />
+                </video>
+            </p>
+
+            <p> To look deeper into tuning parameters, lets drop down a dimension, and consider this one dimensional
+                mixture of three Gaussians.
+
+                <img src="img/integrator_pdf.png" />
+
+            </p>
+
+            <p>To perform HMC, we double the number of dimensions by adding a momentum parameter<span
+                    class=marginnote>This is why we dropped down to 1 dimension, because a 2-dimensional distribution
+                    would require 4 dimensions to visualize the position-momentum phase space.</span>. We evolve the
+                system for a fixed path length, and then the new position becomes our new sample, we discard the
+                momentum, and resample a new one.
+
+                <video autoplay loop>
+                    <source src="img/animated_sample.mp4" type="video/mp4" />
+                </video>
+                <span class=marginnote> A nice intuition to pick up here is that you can get between modes only when
+                    sampling an extreme momentum, which gives the trajectory high energy.</span>
+
+                So the marginal x-axis samples are from our stationary distribution, and the marginal y-axis samples are
+                from the momentum distribution, which we pick. In this case, I chose a normal distribution. One
+                parameter
+                we will work on tuning is the covariance of this momentum distribution. There is research that suggests
+                a covariance that matches the stationary distribution is optimal.<label for="cov"
+                    class="margin-toggle sidenote-number"></label> <input type="checkbox" id="cov"
+                    class="margin-toggle" /><span class=sidenote>Betancourt, Michael. "<a
+                        href="http://arxiv.org/abs/1701.02434">A Conceptual Introduction to Hamiltonian Monte
+                        Carlo.</a>"</span>
+            </p>
+
+            <p> We also care about step size.
+                <video autoplay loop>
+                    <source src="img/multi_animated_sample.mp4" type="video/mp4" />
+                </video>
+                Each of these simulations are sampling 100 points from our stationary distribution, and is displayed
+                with the same frame rate, so this is how the computer feels running your sampling. There <em>is</em> a
+                tradeoff between large steps and integration error, and so you can not just take arbitrarily large
+                steps. We actually have to do a Metropolis acceptance step at the end of each trajectory. By default,
+                PyMC3 tries to get an acceptance rate of 65% for HMC, and 85% for NUTS.
+            </p>
+
+        </section>
+
+        <section>
+            <h2>Tuning HMC</h2>
+            <p> Step size adaptation is fairly quick. These are stochastic optimization problems. You can use a variant
+                of what we used for Metropolis-Hastings earlier, but PyMC3 uses the dual averaging algorithm from the
+                NUTS paper:</p>
+            <pre class=code>
+def dual_averaging_adapt(self, p_accept):
+  self.error_sum += self.target_accept - p_accept
+  log_step = (self.mu -
+              t ** -0.5 * self.error_sum / self.gamma)
+  eta = self.t ** -self.kappa
+  self.log_averaged_step *= (1 - eta)
+  self.log_averaged_step += eta * log_step
+  self.t += 1
+  return np.exp(log_step), np.exp(self.log_averaged_step)
+</pre>
+            <p> It is a pretty dense algorithm, and the goal of putting it here is just to show that we can write id
+                down in a few lines. The parts to call out are that there is a <code>log_step</code> that does some
+                noisy exploration, and a stateful <code>log_averaged_step</code> that smooths out the exploratory steps.
+                While tuning, we use the exploring step size, and after tuning we switch to the averaged step size.
+            </p>
+            <img src="img/step_adapt.png" />
+            <p> Here is what the exploring step size, smoothed step size, and simple algorithm look like on a toy
+                problem. You can see convergence is somewhat faster for the dual averaging algorithm. I initialized
+                the simple step size adaptation (which we used in the Metropolis tuning earlier) at a pretty unfair
+                spot.
+                I do not think it is as bad as that.
+            </p>
+            <p> Covariance estimation is also done in an online fashion:</p>
+            <pre class=code>
+class _WeightedVariance:
+
+  def add_sample(self, x):
+    self.w_sum += 1
+    old_diff = x - self.mean
+    self.mean[:] += old_diff / self.w_sum
+    new_diff = x - self.mean
+    self.raw_var[:] += old_diff * new_diff
+</pre>
+            <p>
+                There is some math going on here you can check, but it runs during tuning, on two different estimator
+                objects, every step:
+            </p>
+            <pre class=code>
+class QuadPotentialDiagAdapt:
+
+  def update(self, sample):
+	self._foreground_var.add_sample(sample)
+	self._background_var.add_sample(sample)
+	self._update_from_weightvar(self._foreground_var)
+
+	n_samples = self._n_samples
+	if n_samples > 0 and n_samples % self.window == 0:
+		self._foreground_var = self._background_var
+		self._background_var = _WeightedVariance()
+
+	self._n_samples += 1
+                </pre>
+            <p>The foreground and background covariance estimators swap out every <code>window</code> steps, which is
+                100 by default.</p>
+
+            <p>So what does this look like?
+                <img src="img/pymc_tuning.png" />
+            </p>
+            <p>PyMC3 has two covariance matrices updating constantly, and the exploratory step size is running the
+                whole time as well. Compare this to this sketch of the Stan warmup routine:
+
+                <img src="img/stan_warmup.png" />
+            </p>
+            <p>
+                The fast tuning of step size is done first, then expanding windows to estimate the covariance matrix,
+                before a final step size adaptation.
+            </p>
+
+        </section>
+
+        <section>
+            <h2>Takeaways</h2>
+            <ul>
+                <li>Automate what you can: a simple API that sets sensible defaults has worked well for us.</li>
+                <li>Consider effective sample size: samples per second is not a good benchmark to optimize.</li>
+                <li>Windowed adaptation: it provides a few orders of improvement to effective samples per second</li>
+            </ul>
+
+            <video autoplay loop>
+                <source src="img/rocket.mp4" type="video/mp4" />
+            </video>
+
+
+        </section>
+    </article>
+</body>
+
+</html>
