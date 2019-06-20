@@ -1,0 +1,361 @@
+<!doctype html>
+<html>
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+	<title>Pragmatic Probabilistic Programming</title>
+
+	<link rel="stylesheet" href="css/reset.css">
+	<link rel="stylesheet" href="css/reveal.css">
+	<link rel="stylesheet" href="css/theme/simple.css">
+	<link rel="stylesheet" href="css/custom.css">
+
+	<!-- Theme used for syntax highlighting of code -->
+	<link rel="stylesheet" href="lib/css/monokai.css">
+
+	<!-- Printing and PDF exports -->
+	<script>
+		var link = document.createElement('link');
+		link.rel = 'stylesheet';
+		link.type = 'text/css';
+		link.href = window.location.search.match(/print-pdf/gi) ? 'css/print/pdf.css' : 'css/print/paper.css';
+		document.getElementsByTagName('head')[0].appendChild(link);
+	</script>
+</head>
+
+<body>
+	<div class="reveal">
+		<div class="slides">
+			<section>
+				<h3>Pragmatic Probabilistic Programming: Parameter Adaptation in PyMC3</h3>
+				<p>
+					<img data-src="img/PyMC3.png" />
+				</p>
+
+				<div id="left">
+					<img data-src="img/logo-red-new.png" />
+				</div>
+				<div id="right">
+					<p style="text-align: right" class="subtitle"><a href="https://colindcarroll.com/">Colin
+							Carroll</a>,
+						Freebird, Inc.</p>
+					<p style="text-align: right" class="subtitle">Cambridge, MA</p>
+				</div>
+			</section>
+
+			<section>
+				<h3>Slides are online!</h3>
+				<p><a href="https://ppl-tuning.colindcarroll.com">ppl-tuning.colindcarroll.com</a>
+					<p>Code is also available <a
+							href="https://gist.github.com/ColCarroll/d3a90fc51674c5cee9eef50873af4354">here.</a>
+						<br>
+						<p>Many thanks to the PyMC team and contributors, and also to autograd + jax developers.</p>
+
+			</section>
+
+			<section>
+				<h3>PyMC3 Syntax</h3>
+				<pre><code data-trim data-noescape>
+import pymc3 as pm
+
+with my_model:  # defined earlier
+    trace = pm.sample()  # ✨✨magic✨✨
+</code></pre>
+			</section>
+
+			<section>
+				<h3>PyMC3 and Stan</h3>
+				<div id="left">
+					<blockquote class="twitter-tweet" data-lang="en">
+						<p lang="en" dir="ltr">&quot;There&#39;s an old saying... &#39;Python is the second-best
+							language for everything&#39;&quot; - <a
+								href="https://twitter.com/callahad?ref_src=twsrc%5Etfw">@callahad</a> <a
+								href="https://twitter.com/hashtag/PyCon2018?src=hash&amp;ref_src=twsrc%5Etfw">#PyCon2018</a>
+						</p>&mdash; Jake VanderPlas (@jakevdp) <a
+							href="https://twitter.com/jakevdp/status/994934052091318272?ref_src=twsrc%5Etfw">May
+							11, 2018</a>
+					</blockquote>
+					<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+				</div>
+				<div id="right">
+					<img height=200 data-src="img/stan_logo.png" />
+				</div>
+			</section>
+
+			<section>
+				<h3>What is tuning?</h3>
+				<p>
+					$$
+					\mathbb{E}[f] = \int f~d\pi \approx \frac{1}{n}\sum_n f(x_j),~~x_j\sim \pi
+					$$
+				</p>
+				<div>
+					<img height=300 data-src="img/what_tuning.png" />
+				</div>
+			</section>
+
+			<section>
+				<h3>Metropolis-Hastings Adaptation</h3>
+				<p>$$A(x_t) = \min\left\{1, \frac{\pi(x_t)}{\pi(x_{t - 1})}\right\}$$</p>
+			</section>
+
+			<section>
+				<h3>Baby Steps</h3>
+				<video autoplay loop>
+					<source data-src="img/small_steps.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Giant Steps</h3>
+				<video autoplay loop>
+					<source data-src="img/big_steps.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Optimal Steps</h3>
+				<video autoplay loop>
+					<source data-src="img/medium_steps.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Effective sample size</h3>
+				<p>$$\hat{\mu} = \frac{1}{n}\sum_{j=1}^n x_j$$</p>
+				<p>$$\operatorname{Var}(\hat{\mu}) = \frac{\sigma^2}{n}$$</p>
+			</section>
+
+			<section>
+				<h3>Effective sample size</h3>
+				<p>$$\hat{\mu} = \frac{1}{n}\sum_{j=1}^n x_j$$</p>
+				<p>$$\operatorname{Var}(\hat{\mu}) = \frac{\sigma^2}{n_{eff}}$$</p>
+			</section>
+
+			<section>
+				<video height=600 autoplay loop>
+					<source data-src="img/multi_steps.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Windowed adaptation</h3>
+				<img data-src="img/step_tuning.png" height=200 />
+			</section>
+
+			<section>
+				<h3>Tuning in PyMC3</h3>
+
+				<pre><code data-trim data-noescape>
+def tune(scale, acc_rate):
+  """Tunes the scaling parameter for the proposal
+  distribution according to the acceptance rate over the
+  last tune_interval:
+
+  Rate    Variance adaptation
+  ----    -------------------
+  <0.001        x 0.1
+  <0.05         x 0.5
+  <0.2          x 0.9
+  >0.5          x 1.1
+  >0.75         x 2
+  >0.95         x 10
+  """
+				</code></pre>
+			</section>
+
+			<section>
+				<h3>Tuning in PyMC3</h3>
+				<pre><code data-trim data-noescape>
+def tune(scale, acc_rate):
+  if acc_rate < 0.001:
+    # reduce by 90 percent
+    scale *=0.1
+  elif acc_rate < 0.05:
+    # reduce by 50 percent
+    ...
+  elif acc_rate > 0.5:
+    # increase by ten percent
+    scale *= 1.1
+
+  return scale
+						</code></pre>
+			</section>
+
+			<section>
+				<h3>Hamiltonian Monte Carlo</h3>
+				<p>$$\frac{d \mathbf{q}}{dt} = \mathbf{p}, ~~ \frac{d \mathbf{p}}{dt} = - \frac{\partial V}{\partial
+					\mathbf{q}}$$</p>
+				<video autoplay loop>
+					<source data-src="img/hmc_examples.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Hamiltonian Monte Carlo</h3>
+				<img data-src="img/integrator_pdf.png" />
+			</section>
+
+			<section>
+				<h3>Hamiltonian Monte Carlo</h3>
+				<video height=400 autoplay loop>
+					<source data-src="img/animated_sample.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Hamiltonian Monte Carlo</h3>
+				<video autoplay loop>
+					<source data-src="img/multi_animated_sample.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Step Size Adapt</h3>
+				<pre><code>
+def dual_averaging_adapt(self, p_accept):
+  self.error_sum += self.target_accept - p_accept
+  log_step = (self.mu -
+              t ** -0.5 * self.error_sum / self.gamma)
+  eta = self.t ** -self.kappa
+  self.log_averaged_step *= (1 - eta)
+  self.log_averaged_step += eta * log_step
+  self.t += 1
+  return np.exp(log_step), np.exp(self.log_averaged_step)
+				</code></pre>
+			</section>
+
+			<section>
+				<h3>Step Size Adapt</h3>
+				<img data-src="img/step_adapt.png" height=400 />
+			</section>
+
+			<section>
+				<h3>Covariance Estimation</h3>
+				<pre><code>
+class _WeightedVariance:
+
+  def add_sample(self, x):
+    self.w_sum += 1
+    old_diff = x - self.mean
+    self.mean[:] += old_diff / self.w_sum
+    new_diff = x - self.mean
+    self.raw_var[:] += old_diff * new_diff
+				</code></pre>
+			</section>
+
+			<section>
+				<h3>Covariance Estimation</h3>
+				<pre><code>
+class QuadPotentialDiagAdapt:
+
+  def update(self, sample):
+	self._foreground_var.add_sample(sample)
+	self._background_var.add_sample(sample)
+	self._update_from_weightvar(self._foreground_var)
+
+	n_samples = self._n_samples
+	if n_samples > 0 and n_samples % self.window == 0:
+		self._foreground_var = self._background_var
+		self._background_var = _WeightedVariance()
+
+	self._n_samples += 1
+				</code></pre>
+			</section>
+
+			<section>
+				<h3>PyMC3 Tuning Routine</h3>
+				<img data-src="img/pymc_tuning.png" height=300 />
+			</section>
+
+			<section>
+				<h3>Stan Warmup</h3>
+				<img data-src="img/stan_warmup.png" height=300 />
+			</section>
+
+			<section>
+
+				<h3>Takeaways</h3>
+				<ul>
+					<li>Automate what you can</li>
+					<li>Consider effective sample size</li>
+					<li>Windowed adaptation</li>
+				</ul>
+			</section>
+
+			<section>
+
+				<h3>Thanks!</h3>
+				<video autoplay loop>
+					<source data-src="img/rocket.mp4" type="video/mp4" />
+				</video>
+
+			</section>
+
+
+			<section>
+				<h3>Nothing to see here</h3>
+			</section>
+
+			<section>
+				<h3>Normal Step Size</h3>
+				<video autoplay loop>
+					<source data-src="img/normal_step_size.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Student's t Step Size</h3>
+				<video autoplay loop>
+					<source data-src="img/t_step_size.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+			<section>
+				<h3>Mixture Step Size</h3>
+				<video autoplay loop>
+					<source data-src="img/mixture_step_size.mp4" type="video/mp4" />
+				</video>
+			</section>
+
+		</div>
+	</div>
+
+	<script src="js/reveal.js"></script>
+
+	<script>
+		// More info about config & dependencies:
+		// - https://github.com/hakimel/reveal.js#configuration
+		// - https://github.com/hakimel/reveal.js#dependencies
+		Reveal.initialize({
+			dependencies: [{
+					src: 'plugin/markdown/marked.js'
+				},
+				{
+					src: 'plugin/markdown/markdown.js'
+				},
+				{
+					src: 'plugin/notes/notes.js',
+					async: true
+				},
+				{
+					src: 'plugin/highlight/highlight.js',
+					async: true
+				},
+				{
+					src: 'plugin/math/math.js',
+					async: true
+				},
+			],
+			history: true,
+			math: {
+				mathjax: 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js',
+				config: 'TeX-AMS_HTML-full' // See http://docs.mathjax.org/en/latest/config-files.html
+			},
+		});
+	</script>
+</body>
+
+</html>
