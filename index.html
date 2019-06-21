@@ -71,14 +71,13 @@
                     with <a href="https://github.com/google/jax">Jax</a> and <a
                         href="https://github.com/HIPS/autograd">autograd</a>. Many thanks to the <a
                         href="https://github.com/pymc-devs/pymc3/graphs/contributors">PyMC3 contributors</a> for
-                    building the library, my colleagues at <a href="https://www.getfreebird.com/">Freebird</a>
-                    for helpful comments, and the conference organizers for inviting me. <img style="max-width: 100px"
-                        src="img/logo-red-new.png" />
+                    building the library, my colleagues at <a href="https://www.getfreebird.com/"><img style="height: 1em" src="img/logo-red-new.png" /></a>
+                    for helpful comments, and the conference organizers for inviting me. Thanks also to Robert P. Goldman for thoughtful proofreading.
                 </span></p>
 
             <p>I am an open source contributor on a number of libraries, notably <a
                     href="https://docs.pymc.io/">PyMC3</a>, which is a library for probabilistic programming in Python.
-                One of the benefits of PyMC3 is the friendly, simple api that abstracts away the details of the
+                One of the benefits of PyMC3 is the friendly, simple API that abstracts away the details of the
                 inference, allowing domain experts to fit models without needing to be experts at inference:</p>
             <pre class=code>
 import pymc3 as pm
@@ -161,7 +160,8 @@ with my_model:  # defined earlier
                 proposal, and accepting or rejecting based on the ratio of the density of the stationary distribution at
                 the proposed point and at the current point: Always accept if the proposal has higher probability, and
                 sometimes reject if the proposal has lower probability:
-                <span class=marginnote>If we are being careful (which, we're not), Hastings extended the algorithm to non-symmetric
+                <span class=marginnote>If we are being careful (which, we're not), Hastings extended the algorithm to
+                    non-symmetric
                     proposal distributions, so this is just a <em>Metropolis</em> acceptance, but all of our proposals
                     will be symmetric anyways</em></span>
                 $$A(x_t) = \min\left\{1, \frac{\pi(x_t)}{\pi(x_{t - 1})}\right\}$$
@@ -259,7 +259,7 @@ def tune(scale, acc_rate):
 
                 $$\hat{\mu} = \frac{1}{n}\sum_{j=1}^n x_j$$
                 $$\operatorname{Var}(\hat{\mu}) = \frac{\sigma^2}{n},$$
-                where \(\sigma^2\) is the true standard deviation of the underlying distribution.
+                where \(\sigma\) is the true standard deviation of the underlying distribution.
             </p>
 
             <p>
@@ -307,6 +307,10 @@ def tune(scale, acc_rate):
                 \frac{d \mathbf{q}}{dt} = \mathbf{p}, ~~ \frac{d \mathbf{p}}{dt} = - \frac{\partial V}{\partial
                 \mathbf{q}}
                 $$
+                <span class=marginnote>Details note: \(V\) is the negative log probability, \(-\log \pi(\mathbf{q})\),
+                    and is the potential energy in this system. This term is also the reason this is a gradient-based
+                    method, and calculating it for arbitrary distributions is why most modern probabilistic programming
+                    languages use an autodiff implementation.</span>
             </p>
             <p>This is a 2D mixture of 3 Gaussians, and I am just simulating Hamiltonian dynamics here, not taking any
                 samples. The Hamiltonian equations conserve energy, so in this physical simulation, a trajectory far
@@ -318,7 +322,7 @@ def tune(scale, acc_rate):
                 </video>
             </p>
 
-            <p> To look deeper into tuning parameters, lets drop down a dimension, and consider this one dimensional
+            <p> To look deeper into tuning parameters, let's drop down a dimension, and consider this one dimensional
                 mixture of three Gaussians.
 
                 <img src="img/integrator_pdf.png" />
@@ -377,7 +381,7 @@ def dual_averaging_adapt(self, p_accept):
   self.t += 1
   return np.exp(log_step), np.exp(self.log_averaged_step)
 </pre>
-            <p> It is a pretty dense algorithm, and the goal of putting it here is just to show that we can write id
+            <p> It is a pretty dense algorithm, and the goal of putting it here is just to show that we can write it
                 down in a few lines. The parts to call out are that there is a <code>log_step</code> that does some
                 noisy exploration, and a stateful <code>log_averaged_step</code> that smooths out the exploratory steps.
                 While tuning, we use the exploring step size, and after tuning we switch to the averaged step size.
@@ -441,8 +445,16 @@ class QuadPotentialDiagAdapt:
             <h2>Takeaways</h2>
             <ul>
                 <li>Automate what you can: a simple API that sets sensible defaults has worked well for us.</li>
-                <li>Consider effective sample size: samples per second is not a good benchmark to optimize.</li>
-                <li>Windowed adaptation: it provides a few orders of improvement to effective samples per second</li>
+                <li>Consider effective sample size: samples per second is not a good benchmark to optimize<label
+                        for="pbar" class="margin-toggle sidenote-number"></label> <input type="checkbox" id="pbar"
+                        class="margin-toggle" /><span class=sidenote> This advice might seem like it is throwing shade
+                        at PyMC3's ubiquitous progress bar - which reports samples per second - but reporting <em>progress</em>
+                        is different from a benchmark. See, e.g., Don Norman's "<a href="https://mitpress.mit.edu/books/design-everyday-things">The Design of Everyday Things</a>", which suggests
+                        providing "full and continuous information about the results of actions and the current state of
+                        the product or service."
+                    </span>
+                    .</li>
+                <li>Windowed adaptation: it provides a few orders of magnitude of improvement to effective samples per second.</li>
             </ul>
 
             <video autoplay loop>
@@ -453,14 +465,14 @@ class QuadPotentialDiagAdapt:
 </body>
 <footer>
     <script type="text/javascript">
-  document._EUGO = 'b165094c741eb9eea96d';
-  document.head.appendChild(function() {
-    var s = document.createElement('script');
-    s.src = 'https://eugo.io/eugo.js';
-    s.async = 1;
-    return s;
-  }());
-</script>
+        document._EUGO = 'b165094c741eb9eea96d';
+        document.head.appendChild(function () {
+            var s = document.createElement('script');
+            s.src = 'https://eugo.io/eugo.js';
+            s.async = 1;
+            return s;
+        }());
+    </script>
 </footer>
 
 </html>
