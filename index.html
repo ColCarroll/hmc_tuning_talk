@@ -69,16 +69,15 @@
                         producing the animations</a> is available on github, mostly leaning on <a
                         href="https://github.com/ColCarroll/minimc">a bespoke library for researching MCMC</a> written
                     with <a href="https://github.com/google/jax">Jax</a> and <a
-                        href="https://github.com/HIPS/autograd">autograd</a>. Many thanks to the <a
-                        href="https://github.com/pymc-devs/pymc3/graphs/contributors">PyMC3 contributors</a> for
-                    building the library, my colleagues at <a href="https://www.getfreebird.com/"><img style="height: 1em" src="img/logo-red-new.png" /></a>
-                    for helpful comments, and the conference organizers for inviting me. Thanks also to Robert P. Goldman for thoughtful proofreading.
-                </span></p>
+                        href="https://github.com/HIPS/autograd">autograd</a>.
+                </span>
+            </p>
 
             <p>I am an open source contributor on a number of libraries, notably <a
                     href="https://docs.pymc.io/">PyMC3</a>, which is a library for probabilistic programming in Python.
                 One of the benefits of PyMC3 is the friendly, simple API that abstracts away the details of the
-                inference, allowing domain experts to fit models without needing to be experts at inference:</p>
+                inference, allowing domain experts to fit models without needing to be experts at inference:
+            </p>
             <pre class=code>
 import pymc3 as pm
 
@@ -87,6 +86,15 @@ with my_model:  # defined earlier
 </pre>
 
             <p>This essay has two goals:
+                <span class=marginnote>
+                    Many thanks to the <a href="https://github.com/pymc-devs/pymc3/graphs/contributors">PyMC3
+                        contributors</a> for building the library, and the conference organizers for inviting me. Thanks
+                    also to Robert P. Goldman for thoughtful proofreading, and to my colleagues at <a href="https://www.getfreebird.com/"><img
+                            style="height: 1em" src="img/logo-red-new.png" /></a>, particularly <a
+                        href="http://maxlivingston.org/">Max Livingston</a>, <a href="https://paulkernfeld.com/">Paul
+                        Kernfeld</a>, and <a href="https://twitter.com/Ferrum_of_omega">Sam Zimmerman</a>,
+                    for patient comments and suggestions.
+                </span>
                 <ol>
                     <li>Provide some intuition into the geometry of some of the algorithms and diagnostics that we
                         use in probabilistic programming to give some appreciation to what happens in the ✨✨magic✨✨
@@ -108,8 +116,8 @@ with my_model:  # defined earlier
                     <blockquote>"What does PyMC3 do that I cannot find in the Stan manual?"</blockquote>
                 </div>
             </p>
-            <p>I love PyMC3's ease of use, extensibility, and community, we have a well-earned reputation for
-                borrowing good ideas from other libraries, particularly the wonderful
+            <p>While I love PyMC3's ease of use, extensibility, and community, we have a well-earned reputation for
+                borrowing good ideas from other projects, particularly the wonderful
                 <a href="https://mc-stan.org/">Stan</a> library.
 
                 <blockquote class="twitter-tweet" data-lang="en">
@@ -448,13 +456,17 @@ class QuadPotentialDiagAdapt:
                 <li>Consider effective sample size: samples per second is not a good benchmark to optimize<label
                         for="pbar" class="margin-toggle sidenote-number"></label> <input type="checkbox" id="pbar"
                         class="margin-toggle" /><span class=sidenote> This advice might seem like it is throwing shade
-                        at PyMC3's ubiquitous progress bar - which reports samples per second - but reporting <em>progress</em>
-                        is different from a benchmark. See, e.g., Don Norman's "<a href="https://mitpress.mit.edu/books/design-everyday-things">The Design of Everyday Things</a>", which suggests
+                        at PyMC3's ubiquitous progress bar - which reports samples per second - but reporting
+                        <em>progress</em>
+                        is different from a benchmark. See, e.g., Don Norman's "<a
+                            href="https://mitpress.mit.edu/books/design-everyday-things">The Design of Everyday
+                            Things</a>", which suggests
                         providing "full and continuous information about the results of actions and the current state of
                         the product or service."
                     </span>
                     .</li>
-                <li>Windowed adaptation: it provides a few orders of magnitude of improvement to effective samples per second.</li>
+                <li>Windowed adaptation: it provides a few orders of magnitude of improvement to effective samples per
+                    second.</li>
             </ul>
 
             <video autoplay loop>
